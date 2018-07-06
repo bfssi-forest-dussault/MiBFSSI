@@ -1,2 +1,2 @@
-# BFSSI-MiSeq-Pipeline
+# MiBFSSI
 Pipeline to process BFSSI MiSeq output. WIP.
