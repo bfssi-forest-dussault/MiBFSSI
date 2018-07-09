@@ -33,6 +33,10 @@ def print_version(ctx, param, value):
 
 @dataclass
 class Sample(object):
+    def __lt__(self, other):
+        """Allows for Sample objects to be sorted"""
+        return self.sample_id < other.sample_id
+
     # Mandatory attributes
     sample_id: str
     r1: Path
@@ -70,24 +74,53 @@ class Sample(object):
               required=False,
               default='_R2',
               help='Pattern to recognize forward reads in input directory. Defaults to "R2".')
+@click.option('-r', '--reference',
+              type=click.Path(exists=True),
+              required=True,
+              default=None,
+              help='Path to a reference .FASTA to use instead of the automatically acquired '
+                   'references from sendsketch.sh')
 @click.option('-t', '--threads',
               type=click.INT,
               required=False,
               default=multiprocessing.cpu_count() - 1,
               help='Number of threads to dedicate to parallelizable steps of the pipeline.'
                    'Will take all available threads - 1 by default.')
+@click.option('--snippy',
+              help='Specify this flag to run snippy against each sample.',
+              is_flag=True,
+              default=False)
+@click.option('--bbmap',
+              help='Specify this flag to run BBMap.sh against each sample to generate sorted BAM files and coverage '
+                   'statistics.',
+              is_flag=True,
+              default=False)
 @click.option('--version',
               help='Specify this flag to print the version and exit.',
               is_flag=True,
               is_eager=True,
               callback=print_version,
               expose_value=False)
-def coveragepipeline(inputdir, outdir, forward_id, reverse_id, threads):
-    logging.info("Starting BFSSIMiSeqPipeline")
+def pipeline(inputdir, outdir, forward_id, reverse_id, reference, threads, snippy, bbmap):
+    logging.info("Starting MiBFSSI Pipeline")
 
     # Path setup
     inputdir = Path(inputdir)
     outdir = Path(outdir)
+    reference = Path(reference)
+
+    # Reference validation
+    if reference is not None and reference.suffix == ".gz":
+        logging.error("ERROR: Please provide an uncompressed reference FASTA file.")
+        quit()
+
+    # Alignment pipeline validation
+    if bbmap and snippy:
+        logging.error("ERROR: Please only specify one alignment pipeline: choose either --snippy or --bbmap (not both)")
+        quit()
+    elif not bbmap and not snippy:
+        logging.error("ERROR: Please specify an alignment pipeline: choose either --snippy or --bbmap (not both)")
+        quit()
 
     # Output directory validation
     try:
@@ -108,35 +141,49 @@ def coveragepipeline(inputdir, outdir, forward_id, reverse_id, threads):
                             r2=reads[1],
                             outdir=outdir / sample_id)
             sample_list.append(sample)
+            if reference is not None:
+                sample.reference_genome = reference
         except KeyError:
             pass
+    sample_list = sorted(sample_list)
 
-    # Populate taxid, taxname, and reference genome for each Sample object
-    taxid_reference_retrieval(sample_list=sample_list, outdir=outdir)
+    if reference is None:
+        # Populate taxid, taxname, and reference genome for each Sample object
+        taxid_reference_retrieval(sample_list=sample_list, outdir=outdir)
 
     # Run analyses
-    logging.info("Calling bbmap and qualimap on each sample")
+    flag_dict = {"BBmap": bbmap, "snippy": snippy}
+    logging.info(f"Aligning reads against reference genome(s) with {[x for x, y in flag_dict.items() if y is True]} "
+                 f"and running Qualimap on resulting .bam files")
     for sample in sample_list:
         try:
+            logging.info(sample.sample_id + "...")
             # Generate BAM + sorted BAM with bbmap
-            sample.bamfile, sample.sorted_bamfile, sample.mapping_stats = call_bbmap(fwd_reads=sample.r1,
-                                                                                     rev_reads=sample.r2,
-                                                                                     reference=sample.reference_genome,
-                                                                                     outdir=sample.outdir,
-                                                                                     sample_id=sample.sample_id,
-                                                                                     threads=threads)
-            # Parse bbmap output and drop it into a dataframe
-            sample.mapping_stats_df = parse_genome_results(sample.mapping_stats, sample_id=sample.sample_id)
+            if bbmap:
+                (sample.bamfile, sample.mapping_stats) = call_bbmap(fwd_reads=sample.r1,
+                                                                    rev_reads=sample.r2,
+                                                                    reference=sample.reference_genome,
+                                                                    outdir=sample.outdir,
+                                                                    sample_id=sample.sample_id,
+                                                                    threads=threads)
 
-            # Send sorted BAM to qualimap
-            sample.qualimap_dir = call_qualimap(bamfile=sample.sorted_bamfile, outdir=sample.outdir)
+                # Parse bbmap output and drop it into a dataframe
+                sample.mapping_stats_df = parse_genome_results(sample.mapping_stats, sample_id=sample.sample_id)
 
-            # Call snippy
-            sample.snippy_dir = call_snippy(fwd_reads=sample.r1,
-                                            rev_reads=sample.r2,
-                                            reference=sample.reference_genome,
-                                            outdir=sample.outdir,
-                                            threads=threads)
+            # Call snippy against each sample
+            if snippy:
+                sample.snippy_dir = call_snippy(fwd_reads=sample.r1,
+                                                rev_reads=sample.r2,
+                                                reference=sample.reference_genome,
+                                                outdir=sample.outdir,
+                                                threads=threads,
+                                                prefix=sample.sample_id)
+                (sample.snippy_summary, sample.snippy_vcf,
+                 sample.snippy_consensus, sample.bamfile) = parse_snippy(snippy_dir=sample.snippy_dir)
+
+            # Qualimap
+            sample.qualimap_dir = call_qualimap(bamfile=sample.bamfile, outdir=sample.outdir, threads=threads)
+
         except KeyError as e:
             logging.error(f"ERROR: Could not call bbmap.sh on {sample.sample_id}. Traceback:")
             logging.error(e)
@@ -159,7 +206,7 @@ def taxid_reference_retrieval(sample_list, outdir):
     taxid_download_list = list(set([x.taxid for x in sample_list]))
 
     # Download the genomes, return dict with key: taxid and value: path to reference
-    logging.info("Calling ncbi-genome-download to retrieve reference genomes")
+    logging.info("Calling ncbi-genome-download to retrieve reference genome(s)")
     reference_genome_dict = taxid_reference_dict(taxids=taxid_download_list, outdir=outdir)
 
     # Update sample objects with corresponding reference genomes
@@ -171,8 +218,8 @@ def taxid_reference_retrieval(sample_list, outdir):
 
 
 def call_sendsketch(fwd_reads: Path, rev_reads: Path) -> tuple:
-    tmpreads = fwd_reads.parents[0] / 'tmpfile.fastq.gz'
-    tmptxt = fwd_reads.parents[0] / 'tmpfile.txt'
+    tmpreads = fwd_reads.parent / 'tmpfile.fastq.gz'
+    tmptxt = fwd_reads.parent / 'tmpfile.txt'
 
     # Merge reads
     cmd = f"bbmerge.sh in1={fwd_reads} in2={rev_reads} out={tmpreads} overwrite=true"
@@ -184,7 +231,7 @@ def call_sendsketch(fwd_reads: Path, rev_reads: Path) -> tuple:
     run_subprocess(cmd)
 
     # Delete merged reads
-    os.remove(tmpreads)
+    tmpreads.unlink()
 
     # Retrieve taxid
     df = pd.read_csv(tmptxt, delimiter="\t", skiprows=2)
@@ -192,7 +239,7 @@ def call_sendsketch(fwd_reads: Path, rev_reads: Path) -> tuple:
     taxname = df['taxName'][0]
 
     # Delete tmptxt
-    os.remove(tmptxt)
+    tmptxt.unlink()
 
     return str(taxid), str(taxname)
 
@@ -218,39 +265,35 @@ def call_bbmap(fwd_reads: Path, rev_reads: Path, reference: Path, outdir: Path, 
     cmd = f"bbmap.sh in={fwd_reads} in2={rev_reads} ref={reference} outm={outbam} covstats={outstats} " \
           f"rebuild=t overwrite=true threads={threads} bamscript=bs.sh; sh bs.sh"
     run_subprocess(cmd)
-    return outbam, outsortedbam, outstats
+
+    # Remove unsorted bam
+    outbam.unlink()
+
+    return outsortedbam, outstats
 
 
-def call_qualimap(bamfile: Path, outdir: Path) -> Path:
+def call_qualimap(bamfile: Path, outdir: Path, threads: int) -> Path:
     outdir = outdir / "qualimap"
     logging.debug(f"Running Qualimap on {bamfile.name}")
-    cmd = f"qualimap bamqc -bam {bamfile} -outdir {outdir}"
+    cmd = f"qualimap bamqc -bam {bamfile} -outdir {outdir} -nt {threads} -nw 1000"
     run_subprocess(cmd)
     return outdir
 
 
-def call_variants(bam: Path, reference: Path) -> tuple:
-    logging.debug(f"Calling variants with bcftools for {bam.name} against {reference.name}")
-
-    outvcf = bam.with_suffix(".vcf")
-    outvcfgz = bam.with_suffix(".vcf.gz")
-
-    cmd = f"samtools mpileup -g -f {reference} -s {bam} | bcftools call -m --ploidy 1 > {outvcf}"
-    run_subprocess(cmd)
-    cmd = f"bcftools view -Oz -o {outvcfgz} {outvcf}"
-    run_subprocess(cmd)
-    cmd = f"htsfile {outvcfgz}"
-    run_subprocess(cmd)
-    cmd = f"bcftools index {outvcfgz}"
-    run_subprocess(cmd)
-    return outvcf, outvcfgz
-
-
-def call_snippy(fwd_reads: Path, rev_reads: Path, reference: Path, outdir: Path, threads: int) -> Path:
+def call_snippy(fwd_reads: Path, rev_reads: Path, reference: Path, outdir: Path, prefix: str, threads: int) -> Path:
     outdir = outdir / "snippy"
-    cmd = f"snippy --cpus {threads} --outdir {outdir} --ref {reference} --R1 {fwd_reads} --R2 {rev_reads}"
+    cmd = f"snippy --cpus {threads} --outdir {outdir} --ref {reference} --prefix {prefix} " \
+          f"--R1 {fwd_reads} --R2 {rev_reads}"
     run_subprocess(cmd)
     return outdir
+
+
+def parse_snippy(snippy_dir: Path) -> tuple:
+    snippy_summary = list(snippy_dir.glob('*.tab'))[0]
+    snippy_vcf = list(snippy_dir.glob('*.vcf'))[0]
+    snippy_consensus = list(snippy_dir.glob('*.aligned.fa'))[0]
+    snippy_bam = list(snippy_dir.glob('*.bam'))[0]
+    return snippy_summary, snippy_vcf, snippy_consensus, snippy_bam
 
 
 def taxid_reference_dict(taxids: list, outdir: Path):
@@ -270,7 +313,7 @@ def taxid_reference_dict(taxids: list, outdir: Path):
     return reference_genome_dict
 
 
-def list_to_text(taxid_list: list, outdir: Path) -> Path:
+def taxid_list_to_text(taxid_list: list, outdir: Path) -> Path:
     taxfile = Path(outdir) / "taxids.txt"
     with open(taxfile, mode="w") as outfile:
         for s in taxid_list:
@@ -311,7 +354,6 @@ def retrieve_fastqgz(directory: Path) -> [Path]:
     :param directory: Path to folder containing output from MiSeq run
     :return: LIST of all .fastq.gz files in directory
     """
-    # fastq_file_list = directory.glob(os.path.join(str(directory), "*.f*q*"))
     fastq_file_list = list(directory.glob("*.f*q*"))
     return fastq_file_list
 
@@ -345,7 +387,10 @@ def populate_sample_dictionary(sample_id_list: list, fastq_file_list: [Path], fo
     sample_dictionary = {}
     for sample_id in sample_id_list:
         read_pair = get_readpair(sample_id, fastq_file_list, forward_id, reverse_id)
-        sample_dictionary[sample_id] = read_pair
+        if read_pair is not None:
+            sample_dictionary[sample_id] = read_pair
+        else:
+            pass
     return sample_dictionary
 
 
@@ -434,4 +479,4 @@ def get_readpair(sample_id: str, fastq_file_list: [Path], forward_id: str, rever
 
 
 if __name__ == "__main__":
-    coveragepipeline()
+    pipeline()
