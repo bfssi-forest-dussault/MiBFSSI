@@ -48,9 +48,9 @@ class Sample(object):
     taxid: str = None
     taxname: str = None
     bamfile: Path = None
-    sorted_bamfile: Path = None
     mapping_stats: Path = None
     mapping_stats_df: pd.DataFrame = None
+    assembly: Path = None
 
 
 @click.command()
@@ -87,12 +87,17 @@ class Sample(object):
               help='Number of threads to dedicate to parallelizable steps of the pipeline.'
                    'Will take all available threads - 1 by default.')
 @click.option('--snippy',
-              help='Specify this flag to run snippy against each sample.',
+              help='Specify this flag to run Snippy against each sample. Useful if you just want to call variants.',
               is_flag=True,
               default=False)
 @click.option('--bbmap',
               help='Specify this flag to run BBMap.sh against each sample to generate sorted BAM files and coverage '
                    'statistics.',
+              is_flag=True,
+              default=False)
+@click.option('--nullarbor',
+              help='Specify this flag to run Nullarbor against each sample. This will run the full pipeline on each '
+                   'sample. https://github.com/tseemann/nullarbor',
               is_flag=True,
               default=False)
 @click.option('--version',
@@ -101,7 +106,7 @@ class Sample(object):
               is_eager=True,
               callback=print_version,
               expose_value=False)
-def pipeline(inputdir, outdir, forward_id, reverse_id, reference, threads, snippy, bbmap):
+def pipeline(inputdir, outdir, forward_id, reverse_id, reference, threads, snippy, bbmap, nullarbor):
     logging.info("Starting MiBFSSI Pipeline")
 
     # Path setup
@@ -114,12 +119,16 @@ def pipeline(inputdir, outdir, forward_id, reverse_id, reference, threads, snipp
         logging.error("ERROR: Please provide an uncompressed reference FASTA file.")
         quit()
 
+    # Pipeline flags
+    pipeline_flags = {"snippy": snippy, "bbmap": bbmap, "nullarbor": nullarbor}
+    active_flags = [y for x, y in pipeline_flags.items() if y is True]
+
     # Alignment pipeline validation
-    if bbmap and snippy:
-        logging.error("ERROR: Please only specify one alignment pipeline: choose either --snippy or --bbmap (not both)")
+    if len(active_flags) > 1:
+        logging.error(f"ERROR: Please only specify one of the following: {pipeline_flags.keys()}")
         quit()
-    elif not bbmap and not snippy:
-        logging.error("ERROR: Please specify an alignment pipeline: choose either --snippy or --bbmap (not both)")
+    elif len(active_flags) == 0:
+        logging.error(f"ERROR: Please specify one of the following {pipeline_flags.keys()}")
         quit()
 
     # Output directory validation
@@ -170,6 +179,12 @@ def pipeline(inputdir, outdir, forward_id, reverse_id, reference, threads, snipp
                 # Parse bbmap output and drop it into a dataframe
                 sample.mapping_stats_df = parse_genome_results(sample.mapping_stats, sample_id=sample.sample_id)
 
+                # Create final mapping stats report for every sample
+                logging.info("Collating mapping statistics")
+                mapping_stats_list = [sample.mapping_stats_df for sample in sample_list]
+                mapping_stats_report = combine_dataframes(mapping_stats_list)
+                mapping_stats_report.to_csv(outdir / "project_mapping_stats.csv", sep=",", index=None)
+
             # Call snippy against each sample
             if snippy:
                 sample.snippy_dir = call_snippy(fwd_reads=sample.r1,
@@ -187,12 +202,6 @@ def pipeline(inputdir, outdir, forward_id, reverse_id, reference, threads, snipp
         except KeyError as e:
             logging.error(f"ERROR: Could not call bbmap.sh on {sample.sample_id}. Traceback:")
             logging.error(e)
-
-    # Create final mapping stats report for every sample
-    logging.info("Collating mapping statistics")
-    mapping_stats_list = [sample.mapping_stats_df for sample in sample_list]
-    mapping_stats_report = combine_dataframes(mapping_stats_list)
-    mapping_stats_report.to_csv(outdir / "project_mapping_stats.csv", sep=",", index=None)
 
 
 def taxid_reference_retrieval(sample_list, outdir):
@@ -275,12 +284,16 @@ def call_bbmap(fwd_reads: Path, rev_reads: Path, reference: Path, outdir: Path, 
 def call_qualimap(bamfile: Path, outdir: Path, threads: int) -> Path:
     outdir = outdir / "qualimap"
     logging.debug(f"Running Qualimap on {bamfile.name}")
-    cmd = f"qualimap bamqc -bam {bamfile} -outdir {outdir} -nt {threads} -nw 1000"
+    cmd = f"qualimap bamqc -bam {bamfile} -outdir {outdir} -nt {threads} -nw 3000"
     run_subprocess(cmd)
     return outdir
 
 
 def call_snippy(fwd_reads: Path, rev_reads: Path, reference: Path, outdir: Path, prefix: str, threads: int) -> Path:
+    """
+    Note that this is still using version 3.x because it was conda installed. Should be updated to 4.x soon...
+    https://github.com/tseemann/snippy
+    """
     outdir = outdir / "snippy"
     cmd = f"snippy --cpus {threads} --outdir {outdir} --ref {reference} --prefix {prefix} " \
           f"--R1 {fwd_reads} --R2 {rev_reads}"
@@ -372,6 +385,15 @@ def retrieve_unique_sampleids(fastq_file_list: [Path]) -> list:
     # Get unique sample IDs
     sample_id_list = list(set(sample_id_list))
     return sample_id_list
+
+
+def call_nullarbor():
+    """
+    Let nullarbor+SKESA do all of the hard work. Currently not available for install via conda, but should be soon.
+
+    https://github.com/tseemann/nullarbor
+    """
+    pass
 
 
 def populate_sample_dictionary(sample_id_list: list, fastq_file_list: [Path], forward_id: str,
