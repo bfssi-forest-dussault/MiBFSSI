@@ -76,7 +76,7 @@ class Sample(object):
               help='Pattern to recognize forward reads in input directory. Defaults to "R2".')
 @click.option('-r', '--reference',
               type=click.Path(exists=True),
-              required=True,
+              required=False,
               default=None,
               help='Path to a reference .FASTA to use instead of the automatically acquired '
                    'references from sendsketch.sh')
@@ -96,8 +96,7 @@ class Sample(object):
               is_flag=True,
               default=False)
 @click.option('--nullarbor',
-              help='Specify this flag to run Nullarbor against each sample. This will run the full pipeline on each '
-                   'sample. https://github.com/tseemann/nullarbor',
+              help='Specify this flag to run Nullarbor against each sample. https://github.com/tseemann/nullarbor',
               is_flag=True,
               default=False)
 @click.option('--version',
@@ -117,6 +116,9 @@ def pipeline(inputdir, outdir, forward_id, reverse_id, reference, threads, snipp
     # Reference validation
     if reference is not None and reference.suffix == ".gz":
         logging.error("ERROR: Please provide an uncompressed reference FASTA file.")
+        quit()
+    if reference is None and nullarbor:
+        logging.error("ERROR: Please provide a single reference with --reference in order to use nullarbor.")
         quit()
 
     # Pipeline flags
