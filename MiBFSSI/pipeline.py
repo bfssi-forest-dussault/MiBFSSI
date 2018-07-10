@@ -161,12 +161,10 @@ def pipeline(inputdir, outdir, forward_id, reverse_id, reference, threads, snipp
         taxid_reference_retrieval(sample_list=sample_list, outdir=outdir)
 
     # Run analyses
-    flag_dict = {"BBmap": bbmap, "snippy": snippy}
-    logging.info(f"Aligning reads against reference genome(s) with {[x for x, y in flag_dict.items() if y is True]} "
-                 f"and running Qualimap on resulting .bam files")
+    pipeline_flags = {"snippy": snippy, "bbmap": bbmap, "nullarbor": nullarbor}
+    logging.info(f"Running {[x for x, y in pipeline_flags.items() if y is True]}")
     for sample in sample_list:
         try:
-            logging.info(sample.sample_id + "...")
             # Generate BAM + sorted BAM with bbmap
             if bbmap:
                 (sample.bamfile, sample.mapping_stats) = call_bbmap(fwd_reads=sample.r1,
@@ -185,8 +183,10 @@ def pipeline(inputdir, outdir, forward_id, reverse_id, reference, threads, snipp
                 mapping_stats_report = combine_dataframes(mapping_stats_list)
                 mapping_stats_report.to_csv(outdir / "project_mapping_stats.csv", sep=",", index=None)
 
+                # Qualimap
+                sample.qualimap_dir = call_qualimap(bamfile=sample.bamfile, outdir=sample.outdir, threads=threads)
             # Call snippy against each sample
-            if snippy:
+            elif snippy:
                 sample.snippy_dir = call_snippy(fwd_reads=sample.r1,
                                                 rev_reads=sample.r2,
                                                 reference=sample.reference_genome,
@@ -196,12 +196,18 @@ def pipeline(inputdir, outdir, forward_id, reverse_id, reference, threads, snipp
                 (sample.snippy_summary, sample.snippy_vcf,
                  sample.snippy_consensus, sample.bamfile) = parse_snippy(snippy_dir=sample.snippy_dir)
 
-            # Qualimap
-            sample.qualimap_dir = call_qualimap(bamfile=sample.bamfile, outdir=sample.outdir, threads=threads)
+                # Qualimap
+                sample.qualimap_dir = call_qualimap(bamfile=sample.bamfile, outdir=sample.outdir, threads=threads)
 
         except KeyError as e:
             logging.error(f"ERROR: Could not call bbmap.sh on {sample.sample_id}. Traceback:")
             logging.error(e)
+
+    # Run nullarbor on all samples simultaneously
+    if nullarbor:
+        sample_file = prepare_nullarbor_sample_file(samples=sample_list, outdir=outdir)
+        call_nullarbor(project_name=outdir.name, reference=reference,
+                       outdir=outdir / 'nullarbor', samples=sample_file, threads=threads)
 
 
 def taxid_reference_retrieval(sample_list, outdir):
@@ -387,13 +393,31 @@ def retrieve_unique_sampleids(fastq_file_list: [Path]) -> list:
     return sample_id_list
 
 
-def call_nullarbor():
+def prepare_nullarbor_sample_file(samples: [Sample], outdir: Path) -> Path:
+    outfile = outdir / 'Nullarbor_SampleSheet.tab'
+
+    # Create dataframe with relevant sample object metadata
+    d = []
+    for sample in samples:
+        d.append({'SampleID': sample.sample_id, 'R1': sample.r1, 'R2': sample.r2})
+    df = pd.DataFrame(d)
+
+    # Reorder columns
+    df = df[['SampleID', 'R1', 'R2']]
+
+    # Export to .tab file
+    df.to_csv(outfile, sep="\t", index=None, header=False)
+    return outfile
+
+
+def call_nullarbor(project_name: str, reference: Path, samples: Path, outdir: Path, threads: int):
     """
     Let nullarbor+SKESA do all of the hard work. Currently not available for install via conda, but should be soon.
 
     https://github.com/tseemann/nullarbor
     """
-    pass
+    cmd = f"nullarbor.pl --name {project_name} --ref {reference} --input {samples} --outdir {outdir} --cpus {threads}"
+    run_subprocess(cmd)
 
 
 def populate_sample_dictionary(sample_id_list: list, fastq_file_list: [Path], forward_id: str,
@@ -440,8 +464,8 @@ def consensus_sequence(vcfgz: Path, reference: Path) -> Path:
 
 
 def run_subprocess(cmd):
-    # p = Popen(cmd, shell=True)
-    p = Popen(cmd, shell=True, stdout=PIPE, stderr=PIPE)
+    p = Popen(cmd, shell=True)
+    # p = Popen(cmd, shell=True, stdout=PIPE, stderr=PIPE)
     p.wait()
 
 
