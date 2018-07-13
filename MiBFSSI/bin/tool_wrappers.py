@@ -8,6 +8,18 @@ from subprocess import Popen
 from bin.accessories import run_subprocess, run_subprocess_stdout
 
 
+def call_blastn(database: Path, query_fasta: Path, outdir: Path) -> Path:
+    # Index database
+    cmd = f"makeblastdb -in {database} -parse_seqids -dbtype nucl"
+    run_subprocess(cmd)
+
+    outfile = outdir / query_fasta.with_suffix(".BLASTn").name
+    cmd = f"blastn -query {query_fasta} -db {database} -out {outfile} " \
+          f"-outfmt '6 qseqid stitle slen length qstart qend pident score'"
+    run_subprocess(cmd)
+    return outfile
+
+
 def call_sendsketch(fwd_reads: Path, rev_reads: Path) -> tuple:
     tmpreads = fwd_reads.parent / 'tmpfile.fastq.gz'
     tmptxt = fwd_reads.parent / 'tmpfile.txt'
