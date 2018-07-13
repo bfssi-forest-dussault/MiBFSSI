@@ -5,6 +5,7 @@ __author__ = "Forest Dussault"
 __email__ = "forest.dussault@canada.ca"
 
 import os
+import re
 import click
 import shutil
 import logging
@@ -299,7 +300,6 @@ def call_qualimap(bamfile: Path, outdir: Path, threads: int) -> Path:
 
 def call_snippy(fwd_reads: Path, rev_reads: Path, reference: Path, outdir: Path, prefix: str, threads: int) -> Path:
     """
-    Note that this is still using version 3.x because it was conda installed. Should be updated to 4.x soon...
     https://github.com/tseemann/snippy
     """
     outdir = outdir / "snippy"
@@ -312,12 +312,21 @@ def call_snippy(fwd_reads: Path, rev_reads: Path, reference: Path, outdir: Path,
 def call_nullarbor(project_name: str, reference: Path, samples: Path, outdir: Path, threads: int):
     """
     Let nullarbor+SKESA do all of the hard work. Currently not available for install via conda, but should be soon.
+    Requires a minimum of 4 samples to run and uses a single reference genome for the whole batch for variant calling.
 
     https://github.com/tseemann/nullarbor
     """
     cmd = f"nullarbor.pl --name {project_name} --ref {reference} --input {samples} --outdir {outdir} " \
-          f"--cpus {threads} --trim"
-    run_subprocess(cmd)
+          f"--cpus {threads}"  # TODO: Add --trim parameter when it gets fixed in a new version of nullarbor
+    out, err = run_subprocess_stdout(cmd)
+
+    # Parse out nullarbor's instruction to run the 'nice make' command + run it
+    for line in err.split("\n"):
+        if "nice make" in line:
+            nullarbor_cmd = line.split("] ")[1]
+            print(nullarbor_cmd)
+            p = Popen(['/bin/bash', '-c', nullarbor_cmd], cwd=str(Path.home()))
+            p.wait()
 
 
 def parse_snippy(snippy_dir: Path) -> tuple:
@@ -466,10 +475,22 @@ def consensus_sequence(vcfgz: Path, reference: Path) -> Path:
     return outconsensus
 
 
-def run_subprocess(cmd):
+def run_subprocess(cmd: str):
     p = Popen(cmd, shell=True)
-    # p = Popen(cmd, shell=True, stdout=PIPE, stderr=PIPE)
     p.wait()
+
+
+def run_subprocess_stdout(cmd: str) -> tuple:
+    p = Popen(cmd, shell=True, stdout=PIPE, stderr=PIPE)
+    out, err = p.communicate()
+    out = out.decode('utf-8')
+    err = err.decode('utf-8')
+
+    # Strip all ANSI escape characters
+    ansi_escape = re.compile(r'\x1B\[[0-?]*[ -/]*[@-~]')
+    err = ansi_escape.sub('', err)
+
+    return out, err
 
 
 def parse_genome_results(mapping_stats: Path, sample_id=None) -> pd.DataFrame:
