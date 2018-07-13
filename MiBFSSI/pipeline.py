@@ -309,6 +309,17 @@ def call_snippy(fwd_reads: Path, rev_reads: Path, reference: Path, outdir: Path,
     return outdir
 
 
+def call_nullarbor(project_name: str, reference: Path, samples: Path, outdir: Path, threads: int):
+    """
+    Let nullarbor+SKESA do all of the hard work. Currently not available for install via conda, but should be soon.
+
+    https://github.com/tseemann/nullarbor
+    """
+    cmd = f"nullarbor.pl --name {project_name} --ref {reference} --input {samples} --outdir {outdir} " \
+          f"--cpus {threads} --trim"
+    run_subprocess(cmd)
+
+
 def parse_snippy(snippy_dir: Path) -> tuple:
     snippy_summary = list(snippy_dir.glob('*.tab'))[0]
     snippy_vcf = list(snippy_dir.glob('*.vcf'))[0]
@@ -410,16 +421,6 @@ def prepare_nullarbor_sample_file(samples: [Sample], outdir: Path) -> Path:
     # Export to .tab file
     df.to_csv(outfile, sep="\t", index=None, header=False)
     return outfile
-
-
-def call_nullarbor(project_name: str, reference: Path, samples: Path, outdir: Path, threads: int):
-    """
-    Let nullarbor+SKESA do all of the hard work. Currently not available for install via conda, but should be soon.
-
-    https://github.com/tseemann/nullarbor
-    """
-    cmd = f"nullarbor.pl --name {project_name} --ref {reference} --input {samples} --outdir {outdir} --cpus {threads}"
-    run_subprocess(cmd)
 
 
 def populate_sample_dictionary(sample_id_list: list, fastq_file_list: [Path], forward_id: str,
