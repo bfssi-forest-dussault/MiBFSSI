@@ -1,12 +1,32 @@
 import re
-import shutil
 import logging
 import pandas as pd
 
 from pathlib import Path
+from dataclasses import dataclass
 from subprocess import Popen, PIPE
-from MiBFSSI.pipeline import Sample
-from MiBFSSI.bin.tool_wrappers import call_sendsketch, call_fuse, retrieve_reference_genome
+
+
+@dataclass
+class Sample(object):
+    def __lt__(self, other):
+        """Allows for Sample objects to be sorted"""
+        return self.sample_id < other.sample_id
+
+    # Mandatory attributes
+    sample_id: str
+    r1: Path
+    r2: Path
+    outdir: Path
+
+    # Optional attributes
+    reference_genome: Path = None
+    taxid: str = None
+    taxname: str = None
+    bamfile: Path = None
+    mapping_stats: Path = None
+    mapping_stats_df: pd.DataFrame = None
+    assembly: Path = None
 
 
 def get_sample_dictionary(directory: Path, forward_id: str, reverse_id: str) -> dict:
@@ -65,45 +85,6 @@ def prepare_nullarbor_sample_file(samples: [Sample], outdir: Path) -> Path:
     # Export to .tab file
     df.to_csv(outfile, sep="\t", index=None, header=False)
     return outfile
-
-
-def taxid_reference_retrieval(sample_list, outdir):
-    # Grab taxIDs for each sample
-    logging.info("Running sendsketch.sh to find closest reference genome for each sample")
-    for sample in sample_list:
-        sample.taxid, sample.taxname = call_sendsketch(fwd_reads=sample.r1, rev_reads=sample.r2)
-        logging.info(f"{sample.sample_id}: {sample.taxname} (taxid {sample.taxid})")
-
-    # Prepare list of unique taxids to request for ncbi-genome-download
-    taxid_download_list = list(set([x.taxid for x in sample_list]))
-
-    # Download the genomes, return dict with key: taxid and value: path to reference
-    logging.info("Calling ncbi-genome-download to retrieve reference genome(s)")
-    reference_genome_dict = taxid_reference_dict(taxids=taxid_download_list, outdir=outdir)
-
-    # Update sample objects with corresponding reference genomes
-    for sample in sample_list:
-        try:
-            sample.reference_genome = reference_genome_dict[sample.taxid]
-        except KeyError:
-            pass
-
-
-def taxid_reference_dict(taxids: list, outdir: Path):
-    reference_genome_dict = dict()
-    for taxid in taxids:
-        # Download the closest matching genome from RefSeq
-        reference_genome = retrieve_reference_genome(taxid, outdir)
-
-        # Use fuse.sh to fuse contigs (arbitrary padding of 300 Ns for any gaps)
-        reference_genome = call_fuse(reference_genome)
-
-        # Update reference genome dictionary
-        reference_genome_dict[taxid] = reference_genome
-
-    # Cleanup junk download folder from ncbi-genome-download
-    shutil.rmtree(outdir / "refseq")
-    return reference_genome_dict
 
 
 def taxid_list_to_text(taxid_list: list, outdir: Path) -> Path:

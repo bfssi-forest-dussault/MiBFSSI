@@ -1,10 +1,11 @@
 import os
+import shutil
 import logging
 import pandas as pd
 
 from pathlib import Path
 from subprocess import Popen
-from MiBFSSI.bin.accessories import run_subprocess, run_subprocess_stdout
+from bin.accessories import run_subprocess, run_subprocess_stdout
 
 
 def call_sendsketch(fwd_reads: Path, rev_reads: Path) -> tuple:
@@ -34,11 +35,50 @@ def call_sendsketch(fwd_reads: Path, rev_reads: Path) -> tuple:
     return str(taxid), str(taxname)
 
 
+def taxid_reference_retrieval(sample_list, outdir):
+    # Grab taxIDs for each sample
+    logging.info("Running sendsketch.sh to find closest reference genome for each sample")
+    for sample in sample_list:
+        sample.taxid, sample.taxname = call_sendsketch(fwd_reads=sample.r1, rev_reads=sample.r2)
+        logging.info(f"{sample.sample_id}: {sample.taxname} (taxid {sample.taxid})")
+
+    # Prepare list of unique taxids to request for ncbi-genome-download
+    taxid_download_list = list(set([x.taxid for x in sample_list]))
+
+    # Download the genomes, return dict with key: taxid and value: path to reference
+    logging.info("Calling ncbi-genome-download to retrieve reference genome(s)")
+    reference_genome_dict = taxid_reference_dict(taxids=taxid_download_list, outdir=outdir)
+
+    # Update sample objects with corresponding reference genomes
+    for sample in sample_list:
+        try:
+            sample.reference_genome = reference_genome_dict[sample.taxid]
+        except KeyError:
+            pass
+
+
 def call_fuse(reference: Path) -> Path:
     fused_reference = reference.with_suffix(".fused.fna.gz")  # TODO: Make this less brittle
     cmd = f"fuse.sh in={reference} out={fused_reference} overwrite=true"
     run_subprocess(cmd)
     return fused_reference
+
+
+def taxid_reference_dict(taxids: list, outdir: Path):
+    reference_genome_dict = dict()
+    for taxid in taxids:
+        # Download the closest matching genome from RefSeq
+        reference_genome = retrieve_reference_genome(taxid, outdir)
+
+        # Use fuse.sh to fuse contigs (arbitrary padding of 300 Ns for any gaps)
+        reference_genome = call_fuse(reference_genome)
+
+        # Update reference genome dictionary
+        reference_genome_dict[taxid] = reference_genome
+
+    # Cleanup junk download folder from ncbi-genome-download
+    shutil.rmtree(outdir / "refseq")
+    return reference_genome_dict
 
 
 def call_bbmap(fwd_reads: Path, rev_reads: Path, reference: Path, outdir: Path, sample_id: str, threads: int) -> tuple:
@@ -99,9 +139,6 @@ def call_nullarbor(project_name: str, reference: Path, samples: Path, outdir: Pa
             print(nullarbor_cmd)
             p = Popen(['/bin/bash', '-c', nullarbor_cmd], cwd=str(Path.home()))
             p.wait()
-
-
-
 
 
 def retrieve_reference_genome(taxid_string: str, outdir: Path):

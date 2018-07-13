@@ -7,22 +7,21 @@ __email__ = "forest.dussault@canada.ca"
 import os
 import click
 import logging
-import pandas as pd
 import multiprocessing
 
 from pathlib import Path
-from dataclasses import dataclass
 
 from bin.tool_wrappers import call_qualimap, \
     call_snippy, \
     call_nullarbor, \
-    call_bbmap
+    call_bbmap, \
+    taxid_reference_retrieval
 from bin.accessories import get_sample_dictionary, \
-    taxid_reference_retrieval, \
     combine_dataframes, \
     parse_genome_results, \
     prepare_nullarbor_sample_file, \
-    parse_snippy
+    parse_snippy, \
+    Sample
 
 script = os.path.basename(__file__)
 logger = logging.getLogger()
@@ -38,28 +37,6 @@ def print_version(ctx, param, value):
     logging.info(f"Author: {__author__}")
     logging.info(f"Email: {__email__}")
     quit()
-
-
-@dataclass
-class Sample(object):
-    def __lt__(self, other):
-        """Allows for Sample objects to be sorted"""
-        return self.sample_id < other.sample_id
-
-    # Mandatory attributes
-    sample_id: str
-    r1: Path
-    r2: Path
-    outdir: Path
-
-    # Optional attributes
-    reference_genome: Path = None
-    taxid: str = None
-    taxname: str = None
-    bamfile: Path = None
-    mapping_stats: Path = None
-    mapping_stats_df: pd.DataFrame = None
-    assembly: Path = None
 
 
 @click.command()
