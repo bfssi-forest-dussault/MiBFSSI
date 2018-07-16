@@ -1,10 +1,12 @@
 import re
+import shutil
 import logging
 import pandas as pd
 
 from pathlib import Path
 from dataclasses import dataclass
 from subprocess import Popen, PIPE
+from config import DEPENDENCIES
 
 
 @dataclass
@@ -194,3 +196,35 @@ def parse_snippy(snippy_dir: Path) -> tuple:
     snippy_consensus = list(snippy_dir.glob('*.aligned.fa'))[0]
     snippy_bam = list(snippy_dir.glob('*.bam'))[0]
     return snippy_summary, snippy_vcf, snippy_consensus, snippy_bam
+
+
+def dependency_check(dependency: str) -> bool:
+    """
+    Checks if a given program is present in the user's $PATH
+    :param dependency: String of program name
+    :return: True if program is in $PATH, False if not
+    """
+    check = shutil.which(dependency)
+    if check is not None:
+        return True
+    else:
+        return False
+
+
+def check_dependencies():
+    # Dependency check
+    logging.info("Conducting dependency check...")
+    dependency_dict = dict()
+    for dependency in DEPENDENCIES:
+        dependency_dict[dependency] = dependency_check(dependency)
+    if False in dependency_dict.values():
+        logging.error("ERROR: Cannot locate some dependencies in $PATH...")
+        for key, value in dependency_dict.items():
+            if not value:
+                logging.error(f"Dependency missing: {key}")
+        quit()
+    else:
+        logging.info("Dependency check complete")
+        for key, value in dependency_dict.items():
+            logging.debug(f"Dependency {key}: {value}")
+    logging.info("Dependencies OK")
