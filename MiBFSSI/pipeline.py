@@ -65,7 +65,7 @@ def print_version(ctx, param, value):
               required=False,
               default=None,
               help='Path to a reference .FASTA to use instead of the automatically acquired '
-                   'references from sendsketch.sh')
+                   'references from sendsketch.sh. Must be specified if calling nullarbor.')
 @click.option('-t', '--threads',
               type=click.INT,
               required=False,
@@ -146,7 +146,8 @@ def pipeline(inputdir, outdir, forward_id, reverse_id, reference, threads, snipp
 
     if reference is None:
         # Populate taxid, taxname, and reference genome for each Sample object
-        taxid_reference_retrieval(sample_list=sample_list, outdir=outdir)
+        taxid_reference_retrieval(sample_list=sample_list,
+                                  outdir=outdir)
 
     # Run analyses
     pipeline_flags = {"snippy": snippy, "bbmap": bbmap, "nullarbor": nullarbor}
@@ -155,15 +156,16 @@ def pipeline(inputdir, outdir, forward_id, reverse_id, reference, threads, snipp
         try:
             # Generate BAM + sorted BAM with bbmap
             if bbmap:
-                (sample.bamfile, sample.mapping_stats) = call_bbmap(fwd_reads=sample.r1,
-                                                                    rev_reads=sample.r2,
-                                                                    reference=sample.reference_genome,
-                                                                    outdir=sample.outdir,
-                                                                    sample_id=sample.sample_id,
-                                                                    threads=threads)
+                sample.bamfile, sample.mapping_stats = call_bbmap(fwd_reads=sample.r1,
+                                                                  rev_reads=sample.r2,
+                                                                  reference=sample.reference_genome,
+                                                                  outdir=sample.outdir,
+                                                                  sample_id=sample.sample_id,
+                                                                  threads=threads)
 
                 # Parse bbmap output and drop it into a dataframe
-                sample.mapping_stats_df = parse_genome_results(sample.mapping_stats, sample_id=sample.sample_id)
+                sample.mapping_stats_df = parse_genome_results(mapping_stats=sample.mapping_stats,
+                                                               sample_id=sample.sample_id)
 
                 # Create final mapping stats report for every sample
                 logging.info("Collating mapping statistics")
@@ -172,7 +174,9 @@ def pipeline(inputdir, outdir, forward_id, reverse_id, reference, threads, snipp
                 mapping_stats_report.to_csv(outdir / "project_mapping_stats.csv", sep=",", index=None)
 
                 # Qualimap
-                sample.qualimap_dir = call_qualimap(bamfile=sample.bamfile, outdir=sample.outdir, threads=threads)
+                sample.qualimap_dir = call_qualimap(bamfile=sample.bamfile,
+                                                    outdir=sample.outdir,
+                                                    threads=threads)
 
             # Call snippy against each sample
             elif snippy:
@@ -182,11 +186,14 @@ def pipeline(inputdir, outdir, forward_id, reverse_id, reference, threads, snipp
                                                 outdir=sample.outdir,
                                                 threads=threads,
                                                 prefix=sample.sample_id)
+
                 (sample.snippy_summary, sample.snippy_vcf,
                  sample.snippy_consensus, sample.bamfile) = parse_snippy(snippy_dir=sample.snippy_dir)
 
                 # Qualimap
-                sample.qualimap_dir = call_qualimap(bamfile=sample.bamfile, outdir=sample.outdir, threads=threads)
+                sample.qualimap_dir = call_qualimap(bamfile=sample.bamfile,
+                                                    outdir=sample.outdir,
+                                                    threads=threads)
 
         except KeyError as e:
             logging.error(f"ERROR: Could not process {sample.sample_id}. Traceback:")
@@ -194,9 +201,13 @@ def pipeline(inputdir, outdir, forward_id, reverse_id, reference, threads, snipp
 
     # Run nullarbor on all samples simultaneously
     if nullarbor:
-        sample_file = prepare_nullarbor_sample_file(samples=sample_list, outdir=outdir)
-        call_nullarbor(project_name=outdir.name, reference=reference,
-                       outdir=outdir / 'nullarbor', samples=sample_file, threads=threads)
+        sample_file = prepare_nullarbor_sample_file(samples=sample_list,
+                                                    outdir=outdir)
+        call_nullarbor(project_name=outdir.name,
+                       reference=reference,
+                       outdir=outdir / 'nullarbor',
+                       samples=sample_file,
+                       threads=threads)
 
 
 if __name__ == "__main__":
