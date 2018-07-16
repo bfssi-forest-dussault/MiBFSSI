@@ -21,7 +21,8 @@ from bin.accessories import get_sample_dictionary, \
     parse_genome_results, \
     prepare_nullarbor_sample_file, \
     parse_snippy, \
-    Sample
+    Sample, \
+    check_dependencies
 
 script = os.path.basename(__file__)
 logger = logging.getLogger()
@@ -94,10 +95,16 @@ def print_version(ctx, param, value):
 def pipeline(inputdir, outdir, forward_id, reverse_id, reference, threads, snippy, bbmap, nullarbor):
     logging.info("Starting MiBFSSI Pipeline")
 
+    # Dependency check
+    logging.info("Verifying dependencies...")
+    check_dependencies()
+
     # Path setup
     inputdir = Path(inputdir)
     outdir = Path(outdir)
-    reference = Path(reference)
+
+    if reference is not None:
+        reference = Path(reference)
 
     # Reference validation
     if reference is not None and reference.suffix == ".gz":
@@ -145,17 +152,17 @@ def pipeline(inputdir, outdir, forward_id, reverse_id, reference, threads, snipp
     sample_list = sorted(sample_list)
 
     if reference is None:
-        # Populate taxid, taxname, and reference genome for each Sample object
+        # Populate taxid, taxname, and reference genome for each Sample object within sample_list
         taxid_reference_retrieval(sample_list=sample_list,
                                   outdir=outdir)
 
-    # Run analyses
     pipeline_flags = {"snippy": snippy, "bbmap": bbmap, "nullarbor": nullarbor}
     logging.info(f"Running {[x for x, y in pipeline_flags.items() if y is True]}")
-    for sample in sample_list:
-        try:
-            # Generate BAM + sorted BAM with bbmap
-            if bbmap:
+
+    if bbmap:
+        for sample in sample_list:
+            try:
+                # Generate BAM + sorted BAM with bbmap
                 sample.bamfile, sample.mapping_stats = call_bbmap(fwd_reads=sample.r1,
                                                                   rev_reads=sample.r2,
                                                                   reference=sample.reference_genome,
@@ -167,19 +174,24 @@ def pipeline(inputdir, outdir, forward_id, reverse_id, reference, threads, snipp
                 sample.mapping_stats_df = parse_genome_results(mapping_stats=sample.mapping_stats,
                                                                sample_id=sample.sample_id)
 
-                # Create final mapping stats report for every sample
-                logging.info("Collating mapping statistics")
-                mapping_stats_list = [sample.mapping_stats_df for sample in sample_list]
-                mapping_stats_report = combine_dataframes(mapping_stats_list)
-                mapping_stats_report.to_csv(outdir / "project_mapping_stats.csv", sep=",", index=None)
-
                 # Qualimap
                 sample.qualimap_dir = call_qualimap(bamfile=sample.bamfile,
                                                     outdir=sample.outdir,
                                                     threads=threads)
+            except KeyError as e:
+                logging.error(f"ERROR: Could not process {sample.sample_id}. Traceback:")
+                logging.error(e)
 
-            # Call snippy against each sample
-            elif snippy:
+        # Create final mapping stats report for every sample
+        logging.info("Collating mapping statistics")
+        mapping_stats_list = [sample.mapping_stats_df for sample in sample_list]
+        mapping_stats_report = combine_dataframes(mapping_stats_list)
+        mapping_stats_report.to_csv(outdir / "project_mapping_stats.csv", sep=",", index=None)
+
+    # Call snippy against each sample
+    elif snippy:
+        for sample in sample_list:
+            try:
                 sample.snippy_dir = call_snippy(fwd_reads=sample.r1,
                                                 rev_reads=sample.r2,
                                                 reference=sample.reference_genome,
@@ -194,13 +206,11 @@ def pipeline(inputdir, outdir, forward_id, reverse_id, reference, threads, snipp
                 sample.qualimap_dir = call_qualimap(bamfile=sample.bamfile,
                                                     outdir=sample.outdir,
                                                     threads=threads)
-
-        except KeyError as e:
-            logging.error(f"ERROR: Could not process {sample.sample_id}. Traceback:")
-            logging.error(e)
-
+            except KeyError as e:
+                logging.error(f"ERROR: Could not process {sample.sample_id}. Traceback:")
+                logging.error(e)
     # Run nullarbor on all samples simultaneously
-    if nullarbor:
+    elif nullarbor:
         sample_file = prepare_nullarbor_sample_file(samples=sample_list,
                                                     outdir=outdir)
         call_nullarbor(project_name=outdir.name,
