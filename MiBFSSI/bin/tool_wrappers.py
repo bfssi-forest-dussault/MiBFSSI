@@ -117,7 +117,7 @@ def call_bbmap(fwd_reads: Path, rev_reads: Path, reference: Path, outdir: Path, 
 def call_qualimap(bamfile: Path, outdir: Path, threads: int) -> Path:
     outdir = outdir / "qualimap"
     logging.debug(f"Running Qualimap on {bamfile.name}")
-    cmd = f"qualimap bamqc -bam {bamfile} -outdir {outdir} -nt {threads} -nw 3000"
+    cmd = f"qualimap bamqc -bam {bamfile} -outdir {outdir} -nt {threads} -nw 1000"
     run_subprocess(cmd)
     return outdir
 
