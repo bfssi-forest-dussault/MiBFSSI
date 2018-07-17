@@ -106,6 +106,7 @@ def call_bbmap(fwd_reads: Path, rev_reads: Path, reference: Path, outdir: Path, 
     # Call bbmap
     cmd = f"bbmap.sh in={fwd_reads} in2={rev_reads} ref={reference} outm={outbam} covstats={outstats} " \
           f"rebuild=t overwrite=true threads={threads} bamscript=bs.sh; sh bs.sh"
+    logging.debug(cmd)
     run_subprocess(cmd)
 
     # Remove unsorted bam
@@ -116,8 +117,8 @@ def call_bbmap(fwd_reads: Path, rev_reads: Path, reference: Path, outdir: Path, 
 
 def call_qualimap(bamfile: Path, outdir: Path, threads: int) -> Path:
     outdir = outdir / "qualimap"
-    logging.debug(f"Running Qualimap on {bamfile.name}")
     cmd = f"qualimap bamqc -bam {bamfile} -outdir {outdir} -nt {threads} -nw 1000"
+    logging.debug(cmd)
     run_subprocess(cmd)
     return outdir
 
@@ -129,6 +130,7 @@ def call_snippy(fwd_reads: Path, rev_reads: Path, reference: Path, outdir: Path,
     outdir = outdir / "snippy"
     cmd = f"snippy --cpus {threads} --outdir {outdir} --ref {reference} --prefix {prefix} " \
           f"--R1 {fwd_reads} --R2 {rev_reads}"
+    logging.debug(cmd)
     run_subprocess(cmd)
     return outdir
 
@@ -142,13 +144,14 @@ def call_nullarbor(project_name: str, reference: Path, samples: Path, outdir: Pa
     """
     cmd = f"nullarbor.pl --name {project_name} --ref {reference} --input {samples} --outdir {outdir} " \
           f"--cpus {threads}"  # TODO: Add --trim parameter when it gets fixed in a new version of nullarbor
+    logging.debug(cmd)
     out, err = run_subprocess_stdout(cmd)
 
     # Parse out nullarbor's instruction to run the 'nice make' command + run it
     for line in err.split("\n"):
         if "nice make" in line:
             nullarbor_cmd = line.split("] ")[1]
-            print(nullarbor_cmd)
+            logging.info(nullarbor_cmd)
             p = Popen(['/bin/bash', '-c', nullarbor_cmd], cwd=str(Path.home()))
             p.wait()
 
@@ -157,8 +160,8 @@ def retrieve_reference_genome(taxid_string: str, outdir: Path):
     # Retrieve reference genomes
     cmd = f"ncbi-genome-download " \
           f"-o {outdir} --taxid {taxid_string} -F fasta bacteria"
+    logging.debug(cmd)
     run_subprocess(cmd)
-    logging.info(cmd)
     fasta = list(outdir.glob("*/**/*.fna.gz"))[0]  # Recursively glob for FASTA files, grab first (and only) fasta
     fasta_path = Path(outdir / fasta.name)
     fasta.rename(fasta_path)
