@@ -47,7 +47,7 @@ def print_version(ctx, param, value):
               type=click.Path(exists=True),
               required=True,
               default=None,
-              help='Root directory to store all output files')
+              help='Path to input directory containing your paired-ended *.fastq.gz files')
 @click.option('-o', '--outdir',
               type=click.Path(exists=False),
               required=True,
