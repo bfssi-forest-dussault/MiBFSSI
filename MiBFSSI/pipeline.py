@@ -25,10 +25,12 @@ from bin.accessories import get_sample_dictionary, \
     check_dependencies
 
 script = os.path.basename(__file__)
+
+# Logger setup
 logger = logging.getLogger()
 logging.basicConfig(
     format=f'\033[92m \033[1m {script} %(levelname)-2s:\033[0m %(message)s ',
-    level=logging.INFO)
+    level=logging.DEBUG)
 
 
 def print_version(ctx, param, value):
@@ -93,15 +95,25 @@ def print_version(ctx, param, value):
               callback=print_version,
               expose_value=False)
 def pipeline(inputdir, outdir, forward_id, reverse_id, reference, threads, snippy, bbmap, nullarbor):
-    logging.info("Starting MiBFSSI Pipeline")
-
-    # Dependency check
-    logging.info("Verifying dependencies...")
-    check_dependencies()
-
     # Path setup
     inputdir = Path(inputdir)
     outdir = Path(outdir)
+
+    # Output directory validation
+    try:
+        os.makedirs(str(outdir), exist_ok=False)
+    except FileExistsError:
+        logging.error("ERROR: Output directory already exists.")
+        quit()
+
+    # Write to a logging file
+    handler = logging.FileHandler(outdir / 'MiBFSSI.log')
+    formatter = logging.Formatter('[%(asctime)s - %(levelname)s] %(message)s', "%Y-%m-%d %H:%M:%S")
+    handler.setFormatter(formatter)
+    logger.addHandler(handler)
+
+    logging.info("Starting MiBFSSI Pipeline")
+    check_dependencies()
 
     if reference is not None:
         reference = Path(reference)
@@ -124,13 +136,6 @@ def pipeline(inputdir, outdir, forward_id, reverse_id, reference, threads, snipp
         quit()
     elif len(active_flags) == 0:
         logging.error(f"ERROR: Please specify one of the following {pipeline_flags.keys()}")
-        quit()
-
-    # Output directory validation
-    try:
-        os.makedirs(str(outdir), exist_ok=False)
-    except FileExistsError:
-        logging.error("ERROR: Output directory already exists.")
         quit()
 
     # Pair up FASTQ files and prepare a dictionary of samples
