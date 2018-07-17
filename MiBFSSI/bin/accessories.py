@@ -224,7 +224,6 @@ def check_dependencies():
                 logging.error(f"Dependency missing: {key}")
         quit()
     else:
-        logging.info("Dependency check complete")
         for key, value in dependency_dict.items():
             logging.debug(f"Dependency {key}: {value}")
     logging.info("Dependencies OK")
