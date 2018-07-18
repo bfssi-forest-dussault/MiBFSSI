@@ -42,17 +42,26 @@ def print_version(ctx, param, value):
     quit()
 
 
+def convert_to_path(ctx, param, value):
+    if not value or ctx.resilient_parsing:
+        return
+    value = Path(value)
+    return value
+
+
 @click.command()
 @click.option('-i', '--inputdir',
               type=click.Path(exists=True),
               required=True,
               default=None,
-              help='Path to input directory containing your paired-ended *.fastq.gz files')
+              help='Path to input directory containing your paired-ended *.fastq.gz files',
+              callback=convert_to_path)
 @click.option('-o', '--outdir',
               type=click.Path(exists=False),
               required=True,
               default=None,
-              help='Root directory to store all output files')
+              help='Root directory to store all output files',
+              callback=convert_to_path)
 @click.option('-f', '--forward-id',
               type=click.STRING,
               required=False,
@@ -68,7 +77,8 @@ def print_version(ctx, param, value):
               required=False,
               default=None,
               help='Path to a reference .FASTA to use instead of the automatically acquired '
-                   'references from sendsketch.sh. Must be specified if calling nullarbor.')
+                   'references from sendsketch.sh. Must be specified if calling nullarbor.',
+              callback=convert_to_path)
 @click.option('-t', '--threads',
               type=click.INT,
               required=False,
@@ -95,10 +105,6 @@ def print_version(ctx, param, value):
               callback=print_version,
               expose_value=False)
 def pipeline(inputdir, outdir, forward_id, reverse_id, reference, threads, snippy, bbmap, nullarbor):
-    # Path setup
-    inputdir = Path(inputdir)
-    outdir = Path(outdir)
-
     # Output directory validation
     try:
         os.makedirs(str(outdir), exist_ok=False)
@@ -114,9 +120,6 @@ def pipeline(inputdir, outdir, forward_id, reverse_id, reference, threads, snipp
 
     logging.info("Starting MiBFSSI Pipeline")
     check_dependencies()
-
-    if reference is not None:
-        reference = Path(reference)
 
     # Reference validation
     if reference is not None and reference.suffix == ".gz":
