@@ -15,6 +15,9 @@ from bin.tool_wrappers import call_qualimap, \
     call_snippy, \
     call_nullarbor, \
     call_bbmap, \
+    call_bbduk, \
+    call_spades, \
+    call_quast_eukaryotic, \
     taxid_reference_retrieval
 from bin.accessories import get_sample_dictionary, \
     combine_dataframes, \
@@ -98,13 +101,17 @@ def convert_to_path(ctx, param, value):
               help='Specify this flag to run Nullarbor against each sample. https://github.com/tseemann/nullarbor',
               is_flag=True,
               default=False)
+@click.option('--eukaryote',
+              help='Specify this flag to run a pipeline tailored for eukaryotes against each sample.',
+              is_flag=True,
+              default=False)
 @click.option('--version',
               help='Specify this flag to print the version and exit.',
               is_flag=True,
               is_eager=True,
               callback=print_version,
               expose_value=False)
-def pipeline(inputdir, outdir, forward_id, reverse_id, reference, threads, snippy, bbmap, nullarbor):
+def pipeline(inputdir, outdir, forward_id, reverse_id, reference, threads, snippy, bbmap, nullarbor, eukaryote):
     # Output directory validation
     try:
         os.makedirs(str(outdir), exist_ok=False)
@@ -125,12 +132,12 @@ def pipeline(inputdir, outdir, forward_id, reverse_id, reference, threads, snipp
     if reference is not None and reference.suffix == ".gz":
         logging.error("ERROR: Please provide an uncompressed reference FASTA file.")
         quit()
-    if reference is None and nullarbor:
+    elif reference is None and nullarbor:
         logging.error("ERROR: Please provide a single reference with --reference in order to use nullarbor.")
         quit()
 
     # Pipeline flags
-    pipeline_flags = {"snippy": snippy, "bbmap": bbmap, "nullarbor": nullarbor}
+    pipeline_flags = {"snippy": snippy, "bbmap": bbmap, "nullarbor": nullarbor, "eukaryote": eukaryote}
     active_flags = [y for x, y in pipeline_flags.items() if y is True]
 
     # Alignment pipeline validation
@@ -152,6 +159,8 @@ def pipeline(inputdir, outdir, forward_id, reverse_id, reference, threads, snipp
                             r1=reads[0],
                             r2=reads[1],
                             outdir=outdir / sample_id)
+            logging.debug(f"{sample_id} R1: {reads[0]}")
+            logging.debug(f"{sample_id} R2: {reads[1]}")
             sample_list.append(sample)
             if reference is not None:
                 sample.reference_genome = reference
@@ -159,12 +168,11 @@ def pipeline(inputdir, outdir, forward_id, reverse_id, reference, threads, snipp
             pass
     sample_list = sorted(sample_list)
 
-    if reference is None:
+    if reference is None and not eukaryote:
         # Populate taxid, taxname, and reference genome for each Sample object within sample_list
         taxid_reference_retrieval(sample_list=sample_list,
                                   outdir=outdir)
 
-    pipeline_flags = {"snippy": snippy, "bbmap": bbmap, "nullarbor": nullarbor}
     logging.info(f"Running {[x for x, y in pipeline_flags.items() if y is True]}")
 
     if bbmap:
@@ -226,8 +234,27 @@ def pipeline(inputdir, outdir, forward_id, reverse_id, reference, threads, snipp
                        outdir=outdir / 'nullarbor',
                        samples=sample_file,
                        threads=threads)
+    elif eukaryote:
+        for sample in sample_list:
+            sample.r1, sample.r2 = call_bbduk(fwd_reads=sample.r1,
+                                              rev_reads=sample.r2,
+                                              sample_id=sample.sample_id,
+                                              outdir=outdir)
 
-    # TODO: Add confindr step
+            sample.spades_dir, sample.assembly = call_spades(fwd_reads=sample.r1,
+                                                             rev_reads=sample.r2,
+                                                             outdir=outdir,
+                                                             threads=threads,
+                                                             sample_id=sample.sample_id)
+
+            sample.quast_dir = call_quast_eukaryotic(fwd_reads=sample.r1,
+                                                     rev_reads=sample.r2,
+                                                     assembly_fasta=sample.assembly,
+                                                     outdir=outdir,
+                                                     sample_id=sample.sample_id,
+                                                     threads=threads)
+
+# TODO: Add confindr step?
 
 
 if __name__ == "__main__":
