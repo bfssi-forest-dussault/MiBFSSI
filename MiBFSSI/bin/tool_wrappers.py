@@ -15,7 +15,7 @@ def call_blastn(database: Path, query_fasta: Path, outdir: Path) -> Path:
 
     outfile = outdir / query_fasta.with_suffix(".BLASTn").name
     cmd = f"blastn -query {query_fasta} -db {database} -out {outfile} " \
-          f"-outfmt '6 qseqid stitle slen length qstart qend pident score'"
+          f"-outfmt '6 qseqid sseqid stitle slen length qstart qend pident score'"
     run_subprocess(cmd)
     return outfile
 

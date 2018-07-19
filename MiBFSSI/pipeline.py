@@ -227,6 +227,8 @@ def pipeline(inputdir, outdir, forward_id, reverse_id, reference, threads, snipp
                        samples=sample_file,
                        threads=threads)
 
+    # TODO: Add confindr step
+
 
 if __name__ == "__main__":
     pipeline()
