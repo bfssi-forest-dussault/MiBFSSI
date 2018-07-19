@@ -6,6 +6,7 @@ import pandas as pd
 from pathlib import Path
 from subprocess import Popen
 from bin.accessories import run_subprocess, run_subprocess_stdout
+from MiBFSSI.config import BBDUK_ADAPTERS
 
 
 def call_blastn(database: Path, query_fasta: Path, outdir: Path) -> Path:
@@ -115,6 +116,15 @@ def call_bbmap(fwd_reads: Path, rev_reads: Path, reference: Path, outdir: Path, 
     return outsortedbam, outstats
 
 
+def call_bbduk(fwd_reads: Path, rev_reads: Path, outdir: Path, sample_id: str) -> tuple:
+    fwd_reads_trimmed = outdir / sample_id / "BBDuk" / fwd_reads.name.replace(".fastq.gz", ".trimmed.fastq.gz")
+    rev_reads_trimmed = outdir / sample_id / "BBDuk" / rev_reads.name.replace(".fastq.gz", ".trimmed.fastq.gz")
+    cmd = f"bbduk.sh in={fwd_reads} in2={rev_reads} out={fwd_reads_trimmed} out2={rev_reads_trimmed} " \
+          f"ref={BBDUK_ADAPTERS}"
+    run_subprocess(cmd)
+    return fwd_reads_trimmed, rev_reads_trimmed
+
+
 def call_qualimap(bamfile: Path, outdir: Path, threads: int) -> Path:
     outdir = outdir / "qualimap"
     cmd = f"qualimap bamqc -bam {bamfile} -outdir {outdir} -nt {threads} -nw 1000"
@@ -131,6 +141,35 @@ def call_snippy(fwd_reads: Path, rev_reads: Path, reference: Path, outdir: Path,
     cmd = f"snippy --cpus {threads} --outdir {outdir} --ref {reference} --prefix {prefix} " \
           f"--R1 {fwd_reads} --R2 {rev_reads}"
     logging.debug(cmd)
+    run_subprocess(cmd)
+    return outdir
+
+
+def call_spades(fwd_reads: Path, rev_reads: Path, outdir: Path, threads: int, sample_id: str) -> tuple:
+    outdir = outdir / sample_id / "SPAdes"
+    cmd = f"spades.py -1 {fwd_reads} -2 {rev_reads} -o {outdir} -t {threads}"
+    run_subprocess(cmd)
+    assembly = outdir / "contigs.fasta"
+    return outdir, assembly
+
+
+def call_spades_hybrid(fwd_reads: Path, rev_reads: Path, minion_reads: Path, outdir: Path,
+                       threads: int, sample_id: str) -> tuple:
+    """
+    Implementing this is a big hassle because I have to figure out how to associate minion reads with the MiSeq reads.
+    """
+    outdir = outdir / sample_id / "SPAdes"
+    cmd = f"spades.py -1 {fwd_reads} -2 {rev_reads} --nanopore {minion_reads} -o {outdir} -t {threads}"
+    run_subprocess(cmd)
+    assembly = outdir / "contigs.fasta"
+    return outdir, assembly
+
+
+def call_quast_eukaryotic(fwd_reads: Path, rev_reads: Path, assembly_fasta: Path, outdir: Path,
+                          sample_id: str, threads: int) -> Path:
+    outdir = outdir / sample_id / "QUAST"
+    cmd = f"quast.py -1 {fwd_reads} -2 {rev_reads} -o {outdir} --threads {threads} " \
+          f"--eukaryote --gene-finding {assembly_fasta}"
     run_subprocess(cmd)
     return outdir
 

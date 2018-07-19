@@ -29,6 +29,9 @@ class Sample(object):
     mapping_stats: Path = None
     mapping_stats_df: pd.DataFrame = None
     assembly: Path = None
+    spades_dir: Path = None
+    quast_dir: Path = None
+    minion_reads: Path = None
 
 
 def get_sample_dictionary(directory: Path, forward_id: str, reverse_id: str) -> dict:
