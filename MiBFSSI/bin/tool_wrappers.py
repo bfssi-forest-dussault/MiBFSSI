@@ -120,7 +120,7 @@ def call_bbduk(fwd_reads: Path, rev_reads: Path, outdir: Path, sample_id: str) -
     fwd_reads_trimmed = outdir / sample_id / "BBDuk" / fwd_reads.name.replace(".fastq.gz", ".trimmed.fastq.gz")
     rev_reads_trimmed = outdir / sample_id / "BBDuk" / rev_reads.name.replace(".fastq.gz", ".trimmed.fastq.gz")
     cmd = f"bbduk.sh in={fwd_reads} in2={rev_reads} out={fwd_reads_trimmed} out2={rev_reads_trimmed} " \
-          f"ref={BBDUK_ADAPTERS}"
+          f"ref={BBDUK_ADAPTERS} qtrim=rl trimq=10 tbo tpe"
     run_subprocess(cmd)
     return fwd_reads_trimmed, rev_reads_trimmed
 
