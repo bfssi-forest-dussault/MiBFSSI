@@ -36,8 +36,7 @@ class Sample(object):
 
 def get_sample_dictionary(directory: Path, forward_id: str, reverse_id: str) -> dict:
     """
-    Chains several functions together to create a sample dictionary with unique/valid sample IDs as keys
-    and paths to forward and reverse reads as values
+    Creates a sample dictionary with unique/valid sample IDs as keys and paths to forward and reverse reads as values
     :param directory: Path to a directory containing .fastq.gz files
     :param forward_id: ID indicating forward read in filename (e.g. _R1)
     :param reverse_id: ID indicating reverse read in filename (e.g. _R2)
