@@ -6,7 +6,7 @@ import pandas as pd
 from pathlib import Path
 from subprocess import Popen
 from bin.accessories import run_subprocess, run_subprocess_stdout
-from MiBFSSI.config import BBDUK_ADAPTERS
+from config import BBDUK_ADAPTERS
 
 
 def call_blastn(database: Path, query_fasta: Path, outdir: Path) -> Path:
