@@ -48,8 +48,7 @@ def print_version(ctx, param, value):
 def convert_to_path(ctx, param, value):
     if not value or ctx.resilient_parsing:
         return
-    value = Path(value)
-    return value
+    return Path(value)
 
 
 @click.command()
